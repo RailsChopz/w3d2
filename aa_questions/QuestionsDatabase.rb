@@ -61,6 +61,10 @@ class User
     @id = QuestionsDatabase.instance.last_insert_row_id
   end
   
+  def followed_questions
+    QuestionFollows.followed_questions_for_user_id(@id)
+  end
+  
   def authored_questions
     raise "Not yet created" unless @id
     Question.find_by_author(@id)
@@ -71,6 +75,9 @@ class User
     Reply.find_by_user_id(@id)
   end
   
+  def liked_questions
+    QuestionLikes.liked_questions_for_user_id(@id)
+  end 
 end
 
 
@@ -107,6 +114,10 @@ class Question
       quest.map { |q| Question.new(q) }
     end 
     
+    def self.most_followed(n)
+      QuestionFollow.most_followed_questions(n)
+    end
+    
     def initialize(options)
       @id = options['id']
       @title = options['title']
@@ -125,6 +136,10 @@ class Question
       @id = QuestionsDatabase.instance.last_insert_row_id
     end
     
+    def followers
+      QuestionFollows.followers_for_question_id(@id)
+    end 
+    
     def author
       User.find_by_id(@author_id)
     end
@@ -133,9 +148,62 @@ class Question
       raise "Not yet created" unless @id
       Reply.find_by_question_id(@id)
     end
+    
+    def likers
+      raise "Not yet created" unless @id
+      QuestionLikes.likers_for_question_id(@id)
+    end 
+    
+    def num_likes
+      QuestionLikes.likers_for_question_id(@id)
+      
+    end 
 end
 
 class QuestionLikes
+  attr_accessor :question_like, :user_id
+  
+  def self.likers_for_question_id(question_id)
+    likers = QuestionsDatabase.instance.execute(<<-SQL, question_id)
+      SELECT
+        *
+      FROM
+        users
+      WHERE
+        users.id  IN (
+          SELECT
+            user_id
+          FROM
+            question_likes
+          WHERE
+            question_like = ?
+        )
+    SQL
+    
+    return nil if likers.empty? 
+    likers.map { |l| User.new(l) }
+  end
+  
+  def self.liked_questions_for_user_id(user_id)
+    quests = QuestionsDatabase.instance.execute(<<-SQL, user_id)
+      SELECT
+        *
+      FROM
+        questions
+      WHERE
+        questions.id  IN (
+          SELECT
+            question_like
+          FROM
+            question_likes
+          WHERE
+            user_id = ?
+        )
+    SQL
+    
+    return nil if quests.empty? 
+    quests.map { |l| Question.new(l) }
+  end
   
 end
 
@@ -175,6 +243,30 @@ class QuestionFollows
     
     followed_qs.map { |q| Question.new(q) }
   end 
+  
+  def self.most_followed_questions(n)
+    most_followed_qs = QuestionsDatabase.instance.execute(<<-SQL, n)
+      SELECT
+        *
+      FROM 
+        questions
+      JOIN
+        users ON questions.author_id = users.id
+      WHERE questions.id  IN (
+        SELECT
+          question_id
+        FROM
+          question_follows
+        GROUP BY question_id
+        ORDER BY COUNT(user_id) DESC
+        LIMIT ?      
+      )
+    SQL
+    
+    return nil if most_followed_qs.empty? 
+    
+    most_followed_qs.map { |q| Question.new(q) }
+  end
 end
 
 class Reply
